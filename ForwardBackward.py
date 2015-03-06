@@ -10,6 +10,13 @@ LOW_PROB = Decimal(0.0000000001)
 DELTA_LIMIT = Decimal(0.1)
 getcontext().prec=256
 
+def printNone(str):
+    pass
+
+def printDebug(str):
+    print(str)
+
+printInfo = printDebug
 
 def bigram_counters(tagged_sentences):
     # make all of these counters in one go, let's avoid looping over and over
@@ -63,9 +70,10 @@ def em_forward_backward(observations, tags, trans_prob, emission_prob):
         gamma = defaultdict(Decimal)
         xi = defaultdict(Decimal)
         delta = Decimal(0.0)
+        printInfo('\t Starting E-Step')
         for index, sentence in enumerate(observations):
             alpha, beta, p_val = forward_backward(sentence, tags, trans_prob, emission_prob)
-            print ("\t\t Sentence %d,  p = %.6g"%(index, p_val))
+            printInfo ("\t\t Sentence %d,  p = %.6g"%(index, p_val))
             sentence_length = len(sentence)
             for time_step, word in enumerate(sentence):
                 for tag in tags:
@@ -75,7 +83,9 @@ def em_forward_backward(observations, tags, trans_prob, emission_prob):
                         for prev_tag in tags:
                             xi[tag, prev_tag] += alpha[time_step, prev_tag] * trans_prob.get((tag, prev_tag), LOW_PROB) * emission_prob.get((sentence[time_step+1], tag), LOW_PROB) * beta[time_step+1, tag] / alpha[sentence_length, END_SYMBOL]
         # M-step
+        printInfo('\t Starting M-Step')
         for tag in tags:
+            printInfo ("\t\t Running on %s"%(tag))
             # a-hat
             for prev_tag in tags:
                 # Updating transmission probabilities
@@ -84,9 +94,9 @@ def em_forward_backward(observations, tags, trans_prob, emission_prob):
             for sentence in observations:
                 for word in sentence:
                     old_emission = emission_prob[word, tag]
-                    emission_prob[word, tag] = gamma[word, tag] / sum([gamma[word_prime, tag] for (word_prime, tag_prime) in gamma if tag_prime == tag])
+                    emission_prob[word, tag] = gamma[word, tag] / sum([gamma[word_prime, tag] for (word_prime, tag_prime) in gamma if word_prime == word])
                     delta += abs(old_emission - emission_prob[word, tag])
-        print ("Finished, Delta: %.10g"%(delta))
+        printInfo ('    Finished iteration, Delta: %.10g'%(delta))
         converged = delta < DELTA_LIMIT
 
     return trans_prob, emission_prob
@@ -198,19 +208,21 @@ def main():
     nltk.data.path.append('/home/hill1303/Documents/cse5525/nltk_data')
     full_data = nltk.corpus.treebank.tagged_sents()
     full_training_set = full_data[0:3500]
-    training_set1 = full_training_set[0:10]
+    training_set1 = full_training_set[0:500]
     training_set2 = full_training_set[1750:]
     test_set = full_data[3500:]
 
-    print('Geting counts')
+    printInfo('Geting counts')
     tags, tag_given_prev_tag, word_given_tag = get_training_info(training_set1)
     observations = strip_tags_from_sentences(training_set1)
 
-    print('Starting EM forward-backward')
+    printInfo('Starting EM forward-backward')
     trans_prob, emission_prob = em_forward_backward(observations, tags, tag_given_prev_tag, word_given_tag)
-    print('Finished EM forward-backward')
+    printInfo('Finished EM forward-backward')
+    test_model(training_set1, tags, trans_prob, emission_prob)
 
-def test_model(test_set,tags, tag_emission_prob):
+
+def test_model(test_set, tags, trans_prob, emission_prob):
     num_error = 0
     total_words = 0
     labeled_test_set = []
@@ -231,8 +243,8 @@ def test_model(test_set,tags, tag_emission_prob):
             i = i + 1
         total_words += i
         labeled_test_set.append(viterbi_labeled_sent)
-    print (str('Test: ') + " Error Rate: " + str(
-        float(num_error) / total_words) + "\n")
+    print (str('Test: ') + ' Error Rate: ' + str(
+        float(num_error) / total_words) + '\n')
 
 if __name__ == '__main__':
     main()
