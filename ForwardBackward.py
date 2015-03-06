@@ -1,7 +1,8 @@
 from collections import defaultdict
+from decimal import *
 import math
 import nltk
-from decimal import *
+
 
 # All the other sequences are unicode, might as well be consistent
 START_SYMBOL = u'<S>'
@@ -73,19 +74,19 @@ def em_forward_backward(observations, tags, trans_prob, emission_prob):
         printInfo('\t Starting E-Step')
         for index, sentence in enumerate(observations):
             alpha, beta, p_val = forward_backward(sentence, tags, trans_prob, emission_prob)
-            printInfo ("\t\t Sentence %d,  p = %.6g"%(index, p_val))
+            printInfo ("\t    Sentence %d,  p = %.6g"%(index, p_val))
             sentence_length = len(sentence)
             for time_step, word in enumerate(sentence):
                 for tag in tags:
                     gamma[word, tag] += alpha[time_step, tag] * beta[time_step, tag] / p_val
-                    #if tag != END_SYMBOL:
+                    #R1- Removed: if tag != END_SYMBOL:
                     if time_step != sentence_length-1:
                         for prev_tag in tags:
                             xi[tag, prev_tag] += alpha[time_step, prev_tag] * trans_prob.get((tag, prev_tag), LOW_PROB) * emission_prob.get((sentence[time_step+1], tag), LOW_PROB) * beta[time_step+1, tag] / alpha[sentence_length, END_SYMBOL]
         # M-step
         printInfo('\t Starting M-Step')
         for tag in tags:
-            printInfo ("\t\t Running on %s"%(tag))
+            printInfo ("\t    Running on %s"%(tag))
             # a-hat
             for prev_tag in tags:
                 # Updating transmission probabilities
