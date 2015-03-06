@@ -17,6 +17,7 @@ def printNone(str):
 def printDebug(str):
     print(str)
 
+# Change to print extra information
 printInfo = printDebug
 
 def bigram_counters(tagged_sentences):
@@ -78,12 +79,12 @@ def em_forward_backward(observations, tags, trans_prob, emission_prob):
             sentence_length = len(sentence)
             for time_step, word in enumerate(sentence):
                 for tag in tags:
-                    gamma[word, tag] += alpha[time_step, tag] * beta[time_step, tag] / p_val
+                    gamma[word, tag] += alpha[time_step, tag] * beta[time_step+1, tag] / p_val
                     #R1- Removed: if tag != END_SYMBOL:
                     if time_step != sentence_length-1:
                         for prev_tag in tags:
                             xi[tag, prev_tag] += alpha[time_step, prev_tag] * trans_prob.get((tag, prev_tag), LOW_PROB) * emission_prob.get((sentence[time_step+1], tag), LOW_PROB) * beta[time_step+1, tag] / alpha[sentence_length, END_SYMBOL]
-        # M-step
+                            # M-step
         printInfo('\t Starting M-Step')
         for tag in tags:
             printInfo ("\t    Running on %s"%(tag))
@@ -92,11 +93,12 @@ def em_forward_backward(observations, tags, trans_prob, emission_prob):
                 # Updating transmission probabilities
                 trans_prob[tag, prev_tag] = xi[tag, prev_tag] / sum([xi[tag_prime, prev_tag] for tag_prime in tags])
             # b-hat
-            for sentence in observations:
-                for word in sentence:
-                    old_emission = emission_prob[word, tag]
-                    emission_prob[word, tag] = gamma[word, tag] / sum([gamma[word_prime, tag] for (word_prime, tag_prime) in gamma if word_prime == word])
-                    delta += abs(old_emission - emission_prob[word, tag])
+            #for sentence in observations:
+            #    for word in sentence:
+        for (word, tag) in emission_prob.keys():
+            old_emission = emission_prob[word, tag]
+            emission_prob[word, tag] = gamma[word, tag] / sum([gamma[word_prime, tag] for (word_prime, tag_prime) in gamma if word_prime == word])
+            delta += abs(old_emission - emission_prob[word, tag])
         printInfo ('    Finished iteration, Delta: %.10g'%(delta))
         converged = delta < DELTA_LIMIT
 
@@ -166,7 +168,7 @@ def bigram_viterbi(observation, tags, transition_prob, emission_prob):
     for tag in tags:
         first_word = observation[0]
         viterbi_matrix[0, tag] = (
-        transition_prob.get((tag, START_SYMBOL), LOW_PROB) + emission_prob.get(
+        transition_prob.get((tag, START_SYMBOL), LOW_PROB) * emission_prob.get(
             (first_word, tag), LOW_PROB))
         backpointer[0, tag] = None
     # Examine the second word now, we already examined first word
@@ -174,21 +176,21 @@ def bigram_viterbi(observation, tags, transition_prob, emission_prob):
         for tag in tags:
             # max probability for the viterbi matrix
             viterbi_matrix[time_step, tag] = max(
-                viterbi_matrix[time_step - 1, prev_tag] +
-                transition_prob.get((tag, prev_tag), LOW_PROB) +
+                viterbi_matrix[time_step - 1, prev_tag] *
+                transition_prob.get((tag, prev_tag), LOW_PROB) *
                 emission_prob.get((word, tag), LOW_PROB) for prev_tag in tags)
             # argmax for the backpointer
             probability, state = max(
-                (viterbi_matrix[time_step - 1, prev_tag] +
+                (viterbi_matrix[time_step - 1, prev_tag] *
                  transition_prob.get((tag, prev_tag), LOW_PROB),
                  prev_tag) for prev_tag in tags)
             backpointer[time_step, tag] = state
     # Termination steps
     viterbi_matrix[observation_length, END_SYMBOL] = max(
-        viterbi_matrix[observation_length - 1, tag] +
+        viterbi_matrix[observation_length - 1, tag] *
         transition_prob.get((END_SYMBOL, tag), LOW_PROB) for tag in tags)
     probability, state = max(
-        (viterbi_matrix[observation_length - 1, tag] +
+        (viterbi_matrix[observation_length - 1, tag] *
          transition_prob.get((END_SYMBOL, tag), LOW_PROB), tag) for tag in tags)
     backpointer[observation_length, END_SYMBOL] = state
 
@@ -202,26 +204,6 @@ def bigram_viterbi(observation, tags, transition_prob, emission_prob):
     # We are tracing back through the pointers, so the path is in reverse
     backtrace_path = list(reversed(backtrace_path))
     return backtrace_path
-
-
-def main():
-    # Just so my virtualenv knows where to look for the corpus
-    nltk.data.path.append('/home/hill1303/Documents/cse5525/nltk_data')
-    full_data = nltk.corpus.treebank.tagged_sents()
-    full_training_set = full_data[0:3500]
-    training_set1 = full_training_set[0:500]
-    training_set2 = full_training_set[1750:]
-    test_set = full_data[3500:]
-
-    printInfo('Geting counts')
-    tags, tag_given_prev_tag, word_given_tag = get_training_info(training_set1)
-    observations = strip_tags_from_sentences(training_set1)
-
-    printInfo('Starting EM forward-backward')
-    trans_prob, emission_prob = em_forward_backward(observations, tags, tag_given_prev_tag, word_given_tag)
-    printInfo('Finished EM forward-backward')
-    test_model(training_set1, tags, trans_prob, emission_prob)
-
 
 def test_model(test_set, tags, trans_prob, emission_prob):
     num_error = 0
@@ -246,6 +228,24 @@ def test_model(test_set, tags, trans_prob, emission_prob):
         labeled_test_set.append(viterbi_labeled_sent)
     print (str('Test: ') + ' Error Rate: ' + str(
         float(num_error) / total_words) + '\n')
+
+def main():
+    # Just so my virtualenv knows where to look for the corpus
+    nltk.data.path.append('/home/hill1303/Documents/cse5525/nltk_data')
+    full_data = nltk.corpus.treebank.tagged_sents()
+    full_training_set = full_data[0:3500]
+    training_set1 = full_training_set[0:1750]
+    training_set2 = full_training_set[1750:]
+    test_set = full_data[3500:]
+
+    printInfo('Geting counts')
+    tags, tag_given_prev_tag, word_given_tag = get_training_info(training_set1)
+    observations = strip_tags_from_sentences(training_set1)
+
+    printInfo('Starting EM forward-backward')
+    trans_prob, emission_prob = em_forward_backward(observations, tags, tag_given_prev_tag, word_given_tag)
+    printInfo('Finished EM forward-backward')
+    test_model(training_set1, tags, trans_prob, emission_prob)
 
 if __name__ == '__main__':
     main()
