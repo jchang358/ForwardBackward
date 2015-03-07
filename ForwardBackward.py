@@ -2,7 +2,7 @@ from collections import defaultdict
 from decimal import *
 import math
 import nltk
-
+import timeit
 
 # All the other sequences are unicode, might as well be consistent
 START_SYMBOL = u'<S>'
@@ -72,22 +72,29 @@ def em_forward_backward(observations, tags, trans_prob, emission_prob):
         gamma = defaultdict(Decimal)
         xi = defaultdict(Decimal)
         delta = Decimal(0.0)
+        start = timeit.default_timer()
         printInfo('\t Starting E-Step')
         for index, sentence in enumerate(observations):
             alpha, beta, p_val = forward_backward(sentence, tags, trans_prob, emission_prob)
-            printInfo ("\t    Sentence %d,  p = %.6g"%(index, p_val))
+            printInfo ("\t    Sentence %d,  p = %.6g time:%f"%(index, p_val, timeit.default_timer()-start))
+            start = timeit.default_timer()
             sentence_length = len(sentence)
+            alpha_end = alpha[sentence_length][END_SYMBOL]
             for time_step, word in enumerate(sentence):
+                if time_step != sentence_length-1:
+                    next_word = sentence[time_step+1]
                 for tag in tags:
-                    gamma[word, tag] += alpha[time_step, tag] * beta[time_step+1, tag] / p_val
+                    gamma[word, tag] += alpha[time_step][tag] * beta[time_step+1][tag] / p_val
                     #R1- Removed: if tag != END_SYMBOL:
                     if time_step != sentence_length-1:
+                        next_beta = beta[time_step+1][tag]
+                        next_emission = emission_prob.get((next_word, tag), LOW_PROB)
                         for prev_tag in tags:
-                            xi[tag, prev_tag] += alpha[time_step, prev_tag] * trans_prob.get((tag, prev_tag), LOW_PROB) * emission_prob.get((sentence[time_step+1], tag), LOW_PROB) * beta[time_step+1, tag] / alpha[sentence_length, END_SYMBOL]
-                            # M-step
+                            xi[tag, prev_tag] += alpha[time_step][prev_tag] * trans_prob.get((tag, prev_tag), LOW_PROB) * next_emission * next_beta / alpha_end
+        # M-step
         printInfo('\t Starting M-Step')
+        printInfo ("\t    Updating transition probabilities")
         for tag in tags:
-            printInfo ("\t    Running on %s"%(tag))
             # a-hat
             for prev_tag in tags:
                 # Updating transmission probabilities
@@ -95,10 +102,12 @@ def em_forward_backward(observations, tags, trans_prob, emission_prob):
             # b-hat
             #for sentence in observations:
             #    for word in sentence:
+        printInfo ("\t    Updating emission probabilities")
         for (word, tag) in emission_prob.keys():
-            old_emission = emission_prob[word, tag]
-            emission_prob[word, tag] = gamma[word, tag] / sum([gamma[word_prime, tag] for (word_prime, tag_prime) in gamma if word_prime == word])
-            delta += abs(old_emission - emission_prob[word, tag])
+            if (word, tag) in gamma:
+                old_emission = emission_prob[word, tag]
+                emission_prob[word, tag] = gamma.get((word, tag),LOW_PROB) / sum([gamma.get((word_prime, tag),LOW_PROB) for (word_prime, tag_prime) in gamma if word_prime == word])
+                delta += abs(old_emission - emission_prob[word, tag])
         printInfo ('    Finished iteration, Delta: %.10g'%(delta))
         converged = delta < DELTA_LIMIT
 
@@ -108,39 +117,37 @@ def em_forward_backward(observations, tags, trans_prob, emission_prob):
 def forward_backward(observation, tags, trans_prob, emission_prob):
     observation_length = len(observation)
 
-    # Forward part
-    forward_matrix = {}
+    forward_matrix = [{} for i in range(observation_length+1)]
+    backward_matrix = [{} for i in range(observation_length+1)]
     first_word = observation[0]
-    for tag in tags:
-        forward_matrix[0, tag] = (
-            trans_prob.get((tag, START_SYMBOL), LOW_PROB) * emission_prob.get((first_word, tag), LOW_PROB))
-    # Examine the second word now, we already examined first word
-    for time_step, word in enumerate(observation[1:], start=1):
-        for tag in tags:
-            operands = [forward_matrix[time_step-1, prev_tag] *
-                        trans_prob.get((tag, prev_tag), LOW_PROB) * emission_prob.get((word, tag), LOW_PROB)
-                        for prev_tag in tags]
-            forward_matrix[time_step, tag] = sum(operands)
 
-    operands = [forward_matrix[observation_length-1, tag] *
-                trans_prob.get((END_SYMBOL, tag), LOW_PROB) for tag in tags]
-    forward_matrix[observation_length, END_SYMBOL] = sum(operands)
-
-
-    # Backward part
-    backward_matrix = {}
     # Initialize
     for tag in tags:
-        backward_matrix[observation_length, tag] = trans_prob.get((END_SYMBOL, tag), LOW_PROB)
-    # Recursion
+        forward_matrix[0][tag] = (
+            trans_prob.get((tag, START_SYMBOL), LOW_PROB) * emission_prob.get((first_word, tag), LOW_PROB))
+        backward_matrix[observation_length][tag] = trans_prob.get((END_SYMBOL, tag), LOW_PROB)
+
+     # Forward part
+    for time_step, word in enumerate(observation[1:], start=1):
+        for tag in tags:
+            operands = [forward_matrix[time_step-1][prev_tag] * trans_prob.get((tag, prev_tag), LOW_PROB) * 
+                        emission_prob.get((word, tag), LOW_PROB) for prev_tag in tags]
+            forward_matrix[time_step][tag] = sum(operands)
+
+    # Backward part
     for time_step in range(observation_length-1, -1, -1):
         for prev_tag in tags:
             next_word = observation[time_step]
             operands = [trans_prob.get((tag, prev_tag), LOW_PROB) *
                         emission_prob.get((next_word, tag), LOW_PROB) *
-                        backward_matrix[time_step+1, tag] for tag in tags]
-            backward_matrix[time_step, prev_tag] = sum(operands)
-    P_val = sum([trans_prob.get((tag, START_SYMBOL), LOW_PROB) * emission_prob.get((observation[0], tag), LOW_PROB) * backward_matrix[1, tag] for tag in tags])
+                        backward_matrix[time_step+1][tag] for tag in tags]
+            backward_matrix[time_step][prev_tag] = sum(operands)
+
+    operands = [forward_matrix[observation_length-1][tag] *
+                trans_prob.get((END_SYMBOL, tag), LOW_PROB) for tag in tags]
+    forward_matrix[observation_length][END_SYMBOL] = sum(operands)
+
+    P_val = sum([trans_prob.get((tag, START_SYMBOL), LOW_PROB) * emission_prob.get((observation[0], tag), LOW_PROB) * backward_matrix[1][tag] for tag in tags])
     
     return forward_matrix, backward_matrix, P_val
 
@@ -240,12 +247,14 @@ def main():
 
     printInfo('Geting counts')
     tags, tag_given_prev_tag, word_given_tag = get_training_info(training_set1)
-    observations = strip_tags_from_sentences(training_set1)
+    observations = strip_tags_from_sentences(training_set2)
 
     printInfo('Starting EM forward-backward')
     trans_prob, emission_prob = em_forward_backward(observations, tags, tag_given_prev_tag, word_given_tag)
+    #forward, backward, P = forward_backward(observations[0], tags, tag_given_prev_tag, word_given_tag)
+    #printInfo(P)
     printInfo('Finished EM forward-backward')
-    test_model(training_set1, tags, trans_prob, emission_prob)
+    test_model(training_set2, tags, trans_prob, emission_prob)
 
 if __name__ == '__main__':
     main()
